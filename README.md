@@ -1,127 +1,201 @@
-# ✈️ TripMate AI — A Multi-Agent Travel Planner with LangGraph
+# ✈️ TripMate AI — Multi-Agent Travel Planner
 
-An open-source AI travel planner that turns a natural-language trip request into a practical travel plan with flight suggestions, hotel ideas, and a day-by-day itinerary. The project uses a multi-agent workflow built with LangGraph, LangChain, and FastAPI.
+[![Live Demo](https://img.shields.io/badge/Demo-Live%20on%20Embarko-brightgreen)](https://tripmate-ai.embarko.app)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-blue)](https://www.langchain.com/langgraph)
+[![Groq](https://img.shields.io/badge/LLM-Groq-orange)](https://groq.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Why this project?
+An intelligent, multi-agent AI travel planning assistant that transforms natural-language travel prompts into detailed, practical trip plans complete with live flight options, hotel suggestions, real-time weather forecasts, and structured day-by-day itineraries.
 
-Planning a trip usually means jumping between multiple websites, tools, and spreadsheets. This project brings that flow into one experience by combining:
+Built using **LangGraph**, **LangChain**, **FastAPI**, **Model Context Protocol (MCP)**, and free weather services from **Open-Meteo**.
 
-- a flight-search agent,
-- a hotel-research agent,
-- an itinerary-planning agent, and
-- a final response agent,
+🌐 **Live Demo:** [https://tripmate-ai.embarko.app](https://tripmate-ai.embarko.app)
 
-all coordinated through a LangGraph workflow.
+---
 
-## Features
+## 🌟 Why TripMate AI?
 
-- ✈️ Flight research using AviationStack
-- 🏨 Hotel suggestions using Tavily search
-- 🧠 Multi-agent orchestration with LangGraph
-- 📝 Structured travel itinerary generation
-- 🌐 FastAPI backend with a simple web interface
-- 💾 Conversation state persistence using PostgreSQL
-- ⚡ LLM-powered responses with Groq
+Planning a trip usually involves context-switching across airline portals, hotel aggregators, weather forecasts, and note apps. TripMate AI brings that entire flow into a unified, autonomous agent pipeline:
 
-## Tech Stack
+```mermaid
+graph TD
+    Start([User Request]) --> FA[✈️ Flight Agent]
+    FA --> HA[🏨 Hotel Agent]
+    HA --> WA[🌤️ Weather Agent]
+    WA --> IA[📝 Itinerary Planner]
+    IA --> Final[🎯 Final Synthesizer]
+    Final --> Response([Complete Travel Plan])
+```
 
-- Python 3.10+
-- FastAPI
-- Jinja2 + HTML/CSS/JavaScript frontend
-- LangGraph
-- LangChain
-- Groq LLMs
-- PostgreSQL
-- Tavily API
-- AviationStack API
+- **✈️ Flight Agent**: Uses AviationStack (via local stdio MCP / fallback) to resolve IATA codes and find live routes.
+- **🏨 Hotel Agent**: Uses Tavily Remote MCP search to gather up-to-date lodging recommendations.
+- **🌤️ Weather Agent**: Integrates Open-Meteo's REST API for coordinates geocoding, current conditions, and 7-day outlooks (no API key needed).
+- **📝 Itinerary Agent**: Formulates a personalized, realistic day-by-day itinerary considering flight and weather context.
+- **🎯 Final Synthesizer**: Formats a polished, budget-aware summary for the traveler.
 
-## Project Structure
+---
+
+## ⚡ Features
+
+- **Autonomous Multi-Agent Workflow:** Orchestrated via stateful LangGraph pipelines.
+- **Model Context Protocol (MCP) Integration:** Remote Streamable HTTP (Tavily) & local stdio adapters.
+- **Zero-Key Weather Tracking:** Pure Python geocoding and weather/forecast lookups via Open-Meteo.
+- **Robust State Persistence:** Uses PostgreSQL checkpointer with automatic fallback to in-memory `MemorySaver`.
+- **FastAPI Modern Web UI:** Clean, responsive, glassmorphism UI with real-time markdown streaming and status indicators.
+- **Production-Ready Hosting:** Deployable directly to managed platforms like Embarko or Docker-friendly environments with zero configuration.
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+|---|---|
+| **Backend Framework** | [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/) |
+| **Agent Orchestration** | [LangGraph](https://www.langchain.com/langgraph), [LangChain](https://www.langchain.com/) |
+| **LLM Inference** | [Groq](https://groq.com/) (`openai/gpt-oss-20b`, `llama-3.3-70b`) |
+| **Tool Protocol** | [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) (`langchain-mcp-adapters`) |
+| **Search & Travel APIs** | [Tavily](https://tavily.com/), [AviationStack](https://aviationstack.com/), [Open-Meteo](https://open-meteo.com/) |
+| **State & Checkpointing** | [PostgreSQL](https://www.postgresql.org/) (`psycopg[binary]`), `MemorySaver` |
+| **Frontend** | HTML5, CSS3 Glassmorphism, Vanilla JavaScript |
+
+---
+
+## 📁 Project Structure
 
 ```text
-.
-├── app.py                # FastAPI app entry point
-├── backend.py            # LangGraph travel workflow
-├── requirements.txt      # Python dependencies
-├── static/               # Static frontend assets
-├── templates/            # HTML templates
-└── tools/                # Flight and web search integrations
+TripMate-AI/
+├── app.py                  # FastAPI server with frontend & REST endpoints
+├── main.py                 # Production container entrypoint (0.0.0.0 & dynamic PORT)
+├── backend.py              # LangGraph state machine, nodes, and checkpointer setup
+├── mcp_client.py           # MultiServerMCPClient & Open-Meteo API integrations
+├── start.bat               # Windows one-click local server launcher
+├── requirements.txt        # Python dependency manifest
+├── static/                 # Frontend assets (CSS styles & JavaScript client)
+├── templates/              # Jinja2 index.html frontend interface
+├── tools/                  # Direct fallback search & flight tooling
+│   ├── flight_tool.py
+│   └── tavily_tool.py
+├── .env.example            # Environment variables template
+└── embarko.json            # Deployment configuration
 ```
 
-## Prerequisites
+---
 
-Before running the project locally, make sure you have:
+## 🚀 Quickstart & Local Setup
 
-- Python 3.10 or newer installed
-- PostgreSQL running and accessible
-- API keys for:
-  - Groq
-  - Tavily
-  - AviationStack
-
-## Environment Variables
-
-Create a .env file in the project root with the following variables:
-
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/travel_db
-GROQ_API_KEY=your_groq_api_key
-AVIATIONSTACK_API_KEY=your_aviationstack_api_key
-TAVILY_API_KEY=your_tavily_api_key
-DEFAULT_ORIGIN_IATA=DAC
+### 1. Clone the repository
+```bash
+git clone https://github.com/cartibhati/TripMate.git
+cd TripMate
 ```
 
-## Installation
-
+### 2. Set up virtual environment
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+
+# On Windows:
+.venv\Scripts\activate
+
+# On macOS/Linux:
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+```bash
 pip install -r requirements.txt
 ```
 
-## Running the App
+### 4. Configure Environment Variables
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Fill in your credentials:
+```env
+GROQ_API_KEY="your_groq_api_key"
+AVIATIONSTACK_API_KEY="your_aviationstack_api_key"
+TAVILY_API_KEY="your_tavily_api_key"
+DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+DEFAULT_ORIGIN_IATA="DAC"
+```
+*(Note: If `DATABASE_URL` is omitted or unavailable, TripMate AI automatically switches to ephemeral memory storage).*
 
-Start the FastAPI server:
-
+### 5. Run the Application
+You can run:
 ```bash
 python app.py
 ```
+*(On Windows, you can also simply double-click `start.bat`)*
 
-Then open your browser at:
+Open your browser at:
+👉 **`http://127.0.0.1:8000`**
 
-```text
-http://127.0.0.1:8000/
+---
+
+## 📡 API Reference
+
+### Health Check
+```http
+GET /health
+```
+**Response:**
+```json
+{
+  "status": "ok",
+  "message": "AI Travel Planner API is running"
+}
 ```
 
-## API Endpoints
-
-- GET /health - Health check
-- POST /api/travel - Submit a travel request
-
-Example request:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/travel \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Plan a 3-day trip to Tokyo with a budget of $1200"}'
+### Generate Travel Plan
+```http
+POST /api/travel
+Content-Type: application/json
+```
+**Request Body:**
+```json
+{
+  "message": "Plan a 5-day trip to Tokyo from Delhi with budget hotels and top food spots",
+  "thread_id": "optional_conversation_id"
+}
+```
+**Response:**
+```json
+{
+  "success": true,
+  "thread_id": "user_...",
+  "answer": "### Trip Summary\n...",
+  "flight_results": "...",
+  "hotel_results": "...",
+  "itinerary": "...",
+  "llm_calls": 4
+}
 ```
 
-## How the Workflow Works
+---
 
-1. The user submits a travel request.
-2. The flight agent gathers flight-related information.
-3. The hotel agent searches for accommodation suggestions.
-4. The itinerary agent creates a practical travel plan.
-5. The final agent formats the result into a polished response.
+## ☁️ Deployment
 
-## Contributing
+### Embarko (Zero-Config)
+The project includes automated deployment settings for [Embarko](https://embarko.ai):
+1. Install the Embarko deploy skill or script.
+2. Provide your `DEPLOY_TOKEN`.
+3. Add your `GROQ_API_KEY`, `TAVILY_API_KEY`, and `AVIATIONSTACK_API_KEY` under the app's **Details / Secrets** tab.
+4. Your application will be live at `https://<your-app-name>.embarko.app`.
 
-Contributions are welcome. If you want to improve the app, add new travel features, or fix issues:
+---
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Open a pull request
+## 🤝 Contributing
 
-## Acknowledgments
+Contributions, issues, and feature requests are welcome!
+1. Fork the repo.
+2. Create your feature branch (`git checkout -b feature/amazing-feature`).
+3. Commit your changes (`git commit -m 'Add amazing feature'`).
+4. Push to the branch (`git push origin feature/amazing-feature`).
+5. Open a Pull Request.
 
-This project is built with the help of modern LLM tooling and travel APIs, and it is intended as a practical example of combining LangGraph agents with real-world applications.
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
