@@ -19,13 +19,63 @@ Built using **LangGraph**, **LangChain**, **FastAPI**, **Model Context Protocol 
 Planning a trip usually involves context-switching across airline portals, hotel aggregators, weather forecasts, and note apps. TripMate AI brings that entire flow into a unified, autonomous agent pipeline:
 
 ```mermaid
-graph TD
-    Start([User Request]) --> FA[✈️ Flight Agent]
-    FA --> HA[🏨 Hotel Agent]
-    HA --> WA[🌤️ Weather Agent]
-    WA --> IA[📝 Itinerary Planner]
-    IA --> Final[🎯 Final Synthesizer]
-    Final --> Response([Complete Travel Plan])
+flowchart TD
+    %% Subgraph: User Input
+    subgraph UI["USER INPUT"]
+        User["👤 User<br/><b>TRAVEL REQUEST</b>"]
+    end
+
+    %% Subgraph: AI Agents Layer
+    subgraph AGENTS["AI AGENTS"]
+        FA["✈️ Flight Agent<br/><small>ROUTE & FARE SEARCH</small>"]
+        HA["🏨 Hotel Agent<br/><small>AVAILABILITY & PRICING</small>"]
+        WA["🌤️ Weather Agent<br/><small>FORECAST & ALERTS</small>"]
+        IA["📋 Itinerary Agent<br/><small>PLAN & SCHEDULE</small>"]
+        FinA["🏆 Final Agent<br/><small>FINAL RESPONSE</small>"]
+
+        FA --> HA --> WA --> IA --> FinA
+    end
+
+    %% Subgraph: Tooling & Integrations
+    subgraph TOOLS["TOOL INTEGRATIONS & LLMS"]
+        T_Flight["📡 AviationStack MCP<br/><small>LOCAL / STDIO MCP</small>"]
+        T_Hotel["🌐 Tavily MCP<br/><small>REMOTE HTTP MCP</small>"]
+        T_Weather["⚡ Open-Meteo API<br/><small>ZERO-KEY WEATHER REST</small>"]
+        T_LLM1["🤖 Groq LLM<br/><small>GENERATIVE PLANNER</small>"]
+        T_LLM2["💬 Groq LLM<br/><small>RESPONSE FORMATTER</small>"]
+    end
+
+    %% Subgraph: Persistence Layer
+    subgraph PERSIST["PERSISTENCE & STATE"]
+        DB[("🐘 PostgreSQL / MemorySaver<br/><small>CHECKPOINTER / LONG-TERM MEMORY</small>")]
+        State["🔗 Shared State<br/><small>CROSS-AGENT CONTEXT</small>"]
+    end
+
+    %% Connections
+    User --> FA
+
+    FA --- T_Flight
+    HA --- T_Hotel
+    WA --- T_Weather
+    IA --- T_LLM1
+    FinA --- T_LLM2
+
+    T_Flight -.- State
+    T_Hotel -.- DB
+    T_Weather -.- State
+    T_LLM1 -.- State
+    T_LLM2 -.- DB
+
+    %% Styling
+    classDef userBox fill:#eef2ff,stroke:#6366f1,stroke-width:2px,color:#1e1b4b;
+    classDef agentBox fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d;
+    classDef toolBox fill:#f8fafc,stroke:#0284c7,stroke-width:1.5px,color:#0f172a;
+    classDef persistBox fill:#fdf4ff,stroke:#a855f7,stroke-width:2px,color:#581c87;
+
+    class User userBox;
+    class FA,HA,WA,IA,FinA agentBox;
+    class T_Flight,T_Hotel,T_Weather,T_LLM1,T_LLM2 toolBox;
+    class DB,State persistBox;
 ```
 
 - **✈️ Flight Agent**: Uses AviationStack (via local stdio MCP / fallback) to resolve IATA codes and find live routes.
