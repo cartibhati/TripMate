@@ -1,5 +1,7 @@
 import os
 import sys
+import shutil
+import asyncio
 from pathlib import Path
 
 import certifi
@@ -51,25 +53,57 @@ AVIATION_ENV["AVIATION_STACK_API_KEY"] = (
 
 
 # ==========================================
-# LLM
+# LLM (Resilient Multi-Model Fallback Chain)
 # ==========================================
 
-if GEMINI_API_KEY:
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
-        google_api_key=GEMINI_API_KEY,
-        temperature=0.2,
-    )
-elif GROQ_API_KEY:
-    llm = ChatGroq(
-        model="openai/gpt-oss-20b",
-        api_key=GROQ_API_KEY
-    )
-else:
-    llm = ChatGroq(
-        model="openai/gpt-oss-20b",
-        api_key="dummy_key"
-    )
+def build_llm(temperature=0.2):
+    models = []
+
+    if GEMINI_API_KEY:
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-flash-lite-latest",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+            )
+        )
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-3.5-flash-lite",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+            )
+        )
+
+    if GROQ_API_KEY:
+        models.append(
+            ChatGroq(
+                model="qwen/qwen3.8-27b",
+                api_key=GROQ_API_KEY,
+                temperature=temperature,
+            )
+        )
+        models.append(
+            ChatGroq(
+                model="openai/gpt-oss-20b",
+                api_key=GROQ_API_KEY,
+                temperature=temperature,
+            )
+        )
+
+    if not models:
+        return ChatGroq(
+            model="openai/gpt-oss-20b",
+            api_key="dummy_key"
+        )
+
+    if len(models) == 1:
+        return models[0]
+
+    return models[0].with_fallbacks(models[1:])
+
+
+llm = build_llm(temperature=0.2)
 
 
 # ==========================================
@@ -189,15 +223,24 @@ async def initialize_mcp():
 
 
 async def tavily_mcp_search(query: str):
-    await initialize_mcp()
+    try:
+        await asyncio.wait_for(initialize_mcp(), timeout=6.0)
+        if search_tool is not None:
+            result = await asyncio.wait_for(
+                search_tool.ainvoke({"query": query}),
+                timeout=8.0
+            )
+            return result
+    except Exception as e:
+        print(f"Tavily MCP search failed or timed out: {e}")
 
-    result = await search_tool.ainvoke(
-        {
-            "query": query
-        }
-    )
-
-    return result
+    # Fallback to direct Tavily SDK
+    try:
+        from tools.tavily_tool import tavily_search
+        return tavily_search(query)
+    except Exception as e2:
+        print(f"Tavily SDK fallback failed: {e2}")
+        return f"Hotel and attraction options for {query}."
 
 
 # ==========================================
@@ -213,49 +256,42 @@ async def initialize_aviation_tools():
     if aviation_tools:
         return
 
-    # Load only AviationStack.
-    # Tavily and Weather will not be initialized here.
-    tools = await client.get_tools(
-        server_name="aviationstack"
-    )
+    if not shutil.which("uvx"):
+        print("Notice: 'uvx' not found in system PATH. Skipping AviationStack stdio MCP.")
+        return
 
-    aviation_tools = {
-        tool.name: tool
-        for tool in tools
-    }
-
-    if not aviation_tools:
-        raise RuntimeError(
-            "AviationStack MCP connected but "
-            "returned no tools."
+    try:
+        tools = await asyncio.wait_for(
+            client.get_tools(server_name="aviationstack"),
+            timeout=5.0
         )
+        aviation_tools = {tool.name: tool for tool in tools}
+    except Exception as e:
+        print(f"Warning: AviationStack MCP initialization failed: {e}")
 
 
 async def aviation_mcp_call(
     tool_name: str,
     tool_args: dict = None
 ):
+    if not shutil.which("uvx"):
+        return f"AviationStack stdio tool unavailable (uvx not installed)."
+
     await initialize_aviation_tools()
 
     tool = aviation_tools.get(tool_name)
 
     if tool is None:
-        available_tools = ", ".join(
-            sorted(aviation_tools.keys())
+        return f"AviationStack tool '{tool_name}' not available."
+
+    try:
+        result = await asyncio.wait_for(
+            tool.ainvoke(tool_args or {}),
+            timeout=5.0
         )
-
-        raise ValueError(
-            f"AviationStack tool '{tool_name}' "
-            "was not found. "
-            f"Available tools: "
-            f"{available_tools or 'none'}"
-        )
-
-    result = await tool.ainvoke(
-        tool_args or {}
-    )
-
-    return result
+        return result
+    except Exception as e:
+        return f"Aviation tool error: {e}"
 
 
 # ==========================================

@@ -68,28 +68,65 @@ def extract_text(content):
 
 
 # =========================
-# LLM
+# LLM (Resilient Multi-Model Fallback Chain)
 # =========================
 
-if GEMINI_API_KEY:
-    print("Initializing Google Gemini LLM (gemini-3.5-flash)...")
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
-        google_api_key=GEMINI_API_KEY,
-        temperature=0.7,
-    )
-elif GROQ_API_KEY:
-    print("Initializing Groq LLM (openai/gpt-oss-20b)...")
-    llm = ChatGroq(
-        model="openai/gpt-oss-20b",
-        api_key=GROQ_API_KEY
-    )
-else:
-    print("Warning: Neither GEMINI_API_KEY nor GROQ_API_KEY found.")
-    llm = ChatGroq(
-        model="openai/gpt-oss-20b",
-        api_key="dummy_key"
-    )
+def build_llm(temperature=0.7):
+    models = []
+
+    if GEMINI_API_KEY:
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-flash-lite-latest",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+            )
+        )
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-3.5-flash-lite",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+            )
+        )
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-3.5-flash",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+            )
+        )
+
+    if GROQ_API_KEY:
+        models.append(
+            ChatGroq(
+                model="qwen/qwen3.8-27b",
+                api_key=GROQ_API_KEY,
+                temperature=temperature,
+            )
+        )
+        models.append(
+            ChatGroq(
+                model="openai/gpt-oss-20b",
+                api_key=GROQ_API_KEY,
+                temperature=temperature,
+            )
+        )
+
+    if not models:
+        print("Warning: Neither GEMINI_API_KEY nor GROQ_API_KEY found.")
+        return ChatGroq(
+            model="openai/gpt-oss-20b",
+            api_key="dummy_key"
+        )
+
+    if len(models) == 1:
+        return models[0]
+
+    return models[0].with_fallbacks(models[1:])
+
+
+llm = build_llm(temperature=0.7)
 
 
 # =========================
