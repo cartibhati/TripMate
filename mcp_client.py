@@ -6,6 +6,7 @@ import certifi
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 # ==========================================
@@ -20,6 +21,25 @@ load_dotenv()
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+
+def extract_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                texts.append(item["text"])
+            elif isinstance(item, str):
+                texts.append(item)
+            elif hasattr(item, "text"):
+                texts.append(getattr(item, "text"))
+            else:
+                texts.append(str(item))
+        return "".join(texts)
+    return str(content)
 
 
 # Preserve the complete Windows environment when starting
@@ -34,10 +54,22 @@ AVIATION_ENV["AVIATION_STACK_API_KEY"] = (
 # LLM
 # ==========================================
 
-llm = ChatGroq(
-    model="openai/gpt-oss-20b",
-    api_key=GROQ_API_KEY or "dummy_key"
-)
+if GEMINI_API_KEY:
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.5-flash",
+        google_api_key=GEMINI_API_KEY,
+        temperature=0.2,
+    )
+elif GROQ_API_KEY:
+    llm = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key=GROQ_API_KEY
+    )
+else:
+    llm = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key="dummy_key"
+    )
 
 
 # ==========================================
@@ -332,4 +364,4 @@ def extract_destination(query: str):
 
     response = llm.invoke(prompt)
 
-    return response.content.strip()
+    return extract_text(response.content).strip()

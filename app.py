@@ -1,5 +1,4 @@
 from pathlib import Path
-import asyncio
 import traceback
 import uvicorn
 
@@ -10,6 +9,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from backend import run_travel_agent
+
+# This is to allow nested event loops for async calls in FastAPI
+import nest_asyncio
+nest_asyncio.apply()
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -62,8 +66,7 @@ async def travel_planner(request_data: TravelRequest):
                 }
             )
 
-        result = await asyncio.to_thread(
-            run_travel_agent,
+        result = run_travel_agent(
             user_input=user_message,
             thread_id=request_data.thread_id
         )
@@ -111,7 +114,7 @@ async def favicon():
 if __name__ == "__main__":
     uvicorn.run(
         "app:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=True
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000)),
+        reload=False
     )

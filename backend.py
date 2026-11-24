@@ -24,6 +24,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 # from tools.tavily_tool import tavily_search
 # from tools.flight_tool import search_flights
 from mcp_client import tavily_mcp_search, aviation_mcp_call, extract_destination, forecast_mcp_search, weather_mcp_search
@@ -45,18 +46,50 @@ def get_database_url():
 
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-if not GROQ_API_KEY:
-    print("Warning: GROQ_API_KEY is missing from environment.")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+
+def extract_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                texts.append(item["text"])
+            elif isinstance(item, str):
+                texts.append(item)
+            elif hasattr(item, "text"):
+                texts.append(getattr(item, "text"))
+            else:
+                texts.append(str(item))
+        return "".join(texts)
+    return str(content)
 
 
 # =========================
 # LLM
 # =========================
 
-llm = ChatGroq(
-    model="openai/gpt-oss-20b",
-    api_key=GROQ_API_KEY or "dummy_key"
-)
+if GEMINI_API_KEY:
+    print("Initializing Google Gemini LLM (gemini-3.5-flash)...")
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.5-flash",
+        google_api_key=GEMINI_API_KEY,
+        temperature=0.7,
+    )
+elif GROQ_API_KEY:
+    print("Initializing Groq LLM (openai/gpt-oss-20b)...")
+    llm = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key=GROQ_API_KEY
+    )
+else:
+    print("Warning: Neither GEMINI_API_KEY nor GROQ_API_KEY found.")
+    llm = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key="dummy_key"
+    )
 
 
 # =========================
@@ -158,7 +191,7 @@ def flight_agent(state: TravelState):
             HumanMessage(content=prompt)
         ])
 
-        flight_data = response.content
+        flight_data = extract_text(response.content)
 
     except Exception as e:
 
@@ -184,8 +217,17 @@ def flight_agent(state: TravelState):
 
 def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
-    # hotel_results = tavily_search(query)
-    hotel_results = asyncio.run(tavily_mcp_search(query))
+    hotel_results = ""
+    try:
+        hotel_results = asyncio.run(tavily_mcp_search(query))
+    except Exception as e:
+        print(f"Tavily MCP search failed ({e}). Falling back to direct Tavily SDK...")
+        try:
+            from tools.tavily_tool import tavily_search
+            hotel_results = tavily_search(query)
+        except Exception as e2:
+            print(f"Tavily SDK fallback failed ({e2}). Using placeholder guidance.")
+            hotel_results = f"Hotel recommendations for {state['user_query']}: Top rated hotels and boutique stays."
 
     return {
         "hotel_results": hotel_results,
@@ -203,16 +245,20 @@ def hotel_agent(state: TravelState):
 # =========================
 
 def weather_agent(state: TravelState):
+    try:
+        city = extract_destination(state["user_query"])
 
-    city = extract_destination(state["user_query"])
+        weather_data = asyncio.run(
+            weather_mcp_search(city)
+        )
 
-    weather_data = asyncio.run(
-        weather_mcp_search(city)
-    )
-
-    forecast_data = asyncio.run(
-        forecast_mcp_search(city)
-    )
+        forecast_data = asyncio.run(
+            forecast_mcp_search(city)
+        )
+    except Exception as e:
+        print(f"Weather lookup error: {e}")
+        weather_data = "Weather information currently unavailable."
+        forecast_data = "Forecast information currently unavailable."
 
     return {
         "weather_results": f"""
@@ -259,10 +305,11 @@ Make the itinerary practical, budget-aware, and easy to follow.
         SystemMessage(content="You are an expert travel planner."),
         HumanMessage(content=prompt)
     ])
+    clean_itinerary = extract_text(response.content)
 
     return {
-        "itinerary": response.content,
-        "messages": [response],
+        "itinerary": clean_itinerary,
+        "messages": [AIMessage(content=clean_itinerary)],
         "llm_calls": state.get("llm_calls", 0) + 1
     }
 
@@ -313,9 +360,10 @@ Important:
         SystemMessage(content="You are a professional AI travel booking assistant."),
         HumanMessage(content=final_prompt)
     ])
+    clean_final = extract_text(response.content)
 
     return {
-        "messages": [response],
+        "messages": [AIMessage(content=clean_final)],
         "llm_calls": state.get("llm_calls", 0) + 1
     }
 
