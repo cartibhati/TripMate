@@ -19,7 +19,7 @@ load_dotenv()
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 
 # Preserve the complete Windows environment when starting
@@ -35,8 +35,8 @@ AVIATION_ENV["AVIATION_STACK_API_KEY"] = (
 # ==========================================
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=GROQ_API_KEY
+    model="openai/gpt-oss-20b",
+    api_key=GROQ_API_KEY or "dummy_key"
 )
 
 
@@ -61,21 +61,6 @@ client = MultiServerMCPClient(
                 "aviationstack-mcp"
             ],
             "env": AVIATION_ENV
-        },
-
-        # Open-Meteo MCP server — free, no API key required.
-        # Provides 17+ weather tools: current weather, forecasts,
-        # historical data, air quality, marine, geocoding and more.
-        "weather": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": [
-                "-y",
-                "-p",
-                "open-meteo-mcp-server",
-                "open-meteo-mcp-server"
-            ],
-            "env": os.environ.copy()
         }
     }
 )
@@ -242,80 +227,93 @@ async def aviation_mcp_call(
 
 
 # ==========================================
-# Weather MCP tools
-# open-meteo-mcp-server tool names:
-#   get_current_weather  — current conditions
-#   get_weather_forecast — multi-day forecast
+# Open-Meteo Weather Tools (Direct HTTP API)
+# No API key required, pure Python requests.
+# Works in any environment (including Docker/Embarko)
 # ==========================================
 
-weather_tool = None
-forecast_tool = None
+import requests
 
-
-async def initialize_weather_tools():
-    global weather_tool
-    global forecast_tool
-
-    if (
-        weather_tool is not None
-        and forecast_tool is not None
-    ):
-        return
-
-    # Load only Weather server.
-    tools = await client.get_tools(
-        server_name="weather"
-    )
-
-    tools_by_name = {
-        tool.name: tool
-        for tool in tools
-    }
-
-    # open-meteo-mcp-server exposes get_current_weather
-    # and get_weather_forecast
-    weather_tool = tools_by_name.get("get_current_weather")
-    forecast_tool = tools_by_name.get("get_weather_forecast")
-
-    # Fallback: if names differ, pick the first two available tools
-    available = list(tools_by_name.values())
-    if weather_tool is None and len(available) >= 1:
-        weather_tool = available[0]
-    if forecast_tool is None and len(available) >= 2:
-        forecast_tool = available[1]
-
-    if weather_tool is None:
-        raise RuntimeError(
-            "Weather MCP connected but no current-weather tool found. "
-            f"Available tools: {', '.join(tools_by_name.keys()) or 'none'}"
-        )
+def _get_coordinates(location_name: str):
+    try:
+        url = "https://geocoding-api.open-meteo.com/v1/search"
+        params = {"name": location_name, "count": 1, "language": "en", "format": "json"}
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        if "results" in data and len(data["results"]) > 0:
+            loc = data["results"][0]
+            return loc.get("latitude"), loc.get("longitude"), loc.get("name"), loc.get("country", "")
+    except Exception as e:
+        print(f"Geocoding error for {location_name}: {e}")
+    return None, None, location_name, ""
 
 
 async def weather_mcp_search(city: str):
-    await initialize_weather_tools()
+    lat, lon, name, country = _get_coordinates(city)
+    if lat is None or lon is None:
+        return f"Could not find coordinates for '{city}'."
 
-    result = await weather_tool.ainvoke(
-        {
-            "city": city
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "precipitation", "wind_speed_10m"],
+            "timezone": "auto"
         }
-    )
-
-    return result
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        curr = data.get("current", {})
+        units = data.get("current_units", {})
+        temp = curr.get("temperature_2m", "N/A")
+        t_unit = units.get("temperature_2m", "°C")
+        humidity = curr.get("relative_humidity_2m", "N/A")
+        feels_like = curr.get("apparent_temperature", "N/A")
+        wind = curr.get("wind_speed_10m", "N/A")
+        w_unit = units.get("wind_speed_10m", "km/h")
+        
+        return (
+            f"Current Weather in {name}, {country}:\n"
+            f"- Temperature: {temp}{t_unit} (Feels like: {feels_like}{t_unit})\n"
+            f"- Humidity: {humidity}%\n"
+            f"- Wind Speed: {wind} {w_unit}"
+        )
+    except Exception as e:
+        return f"Weather lookup failed for {city}: {e}"
 
 
 async def forecast_mcp_search(city: str):
-    await initialize_weather_tools()
+    lat, lon, name, country = _get_coordinates(city)
+    if lat is None or lon is None:
+        return f"Could not find coordinates for '{city}'."
 
-    if forecast_tool is None:
-        return f"Forecast tool not available. Current weather: {await weather_mcp_search(city)}"
-
-    result = await forecast_tool.ainvoke(
-        {
-            "city": city
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_probability_max"],
+            "timezone": "auto"
         }
-    )
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        daily = data.get("daily", {})
+        dates = daily.get("time", [])
+        max_temps = daily.get("temperature_2m_max", [])
+        min_temps = daily.get("temperature_2m_min", [])
+        rain_prob = daily.get("precipitation_probability_max", [])
 
-    return result
+        lines = [f"7-Day Weather Forecast for {name}, {country}:"]
+        for i in range(min(7, len(dates))):
+            date = dates[i]
+            t_max = max_temps[i] if i < len(max_temps) else "N/A"
+            t_min = min_temps[i] if i < len(min_temps) else "N/A"
+            rain = rain_prob[i] if i < len(rain_prob) else "N/A"
+            lines.append(f"- {date}: High {t_max}°C, Low {t_min}°C, Rain chance {rain}%")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Forecast lookup failed for {city}: {e}"
 
 
 # ==========================================
