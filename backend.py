@@ -68,34 +68,11 @@ def extract_text(content):
 
 
 # =========================
-# LLM (Resilient Multi-Model Fallback Chain)
+# LLM (Ultra-Fast Groq LPU + Gemini Fallback Chain)
 # =========================
 
 def build_llm(temperature=0.7):
     models = []
-
-    if GEMINI_API_KEY:
-        models.append(
-            ChatGoogleGenerativeAI(
-                model="gemini-flash-lite-latest",
-                google_api_key=GEMINI_API_KEY,
-                temperature=temperature,
-            )
-        )
-        models.append(
-            ChatGoogleGenerativeAI(
-                model="gemini-3.5-flash-lite",
-                google_api_key=GEMINI_API_KEY,
-                temperature=temperature,
-            )
-        )
-        models.append(
-            ChatGoogleGenerativeAI(
-                model="gemini-3.5-flash",
-                google_api_key=GEMINI_API_KEY,
-                temperature=temperature,
-            )
-        )
 
     if GROQ_API_KEY:
         models.append(
@@ -103,6 +80,7 @@ def build_llm(temperature=0.7):
                 model="qwen/qwen3.8-27b",
                 api_key=GROQ_API_KEY,
                 temperature=temperature,
+                max_retries=1,
             )
         )
         models.append(
@@ -110,13 +88,32 @@ def build_llm(temperature=0.7):
                 model="openai/gpt-oss-20b",
                 api_key=GROQ_API_KEY,
                 temperature=temperature,
+                max_retries=1,
+            )
+        )
+
+    if GEMINI_API_KEY:
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-flash-lite-latest",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+                max_retries=0,
+            )
+        )
+        models.append(
+            ChatGoogleGenerativeAI(
+                model="gemini-3.5-flash-lite",
+                google_api_key=GEMINI_API_KEY,
+                temperature=temperature,
+                max_retries=0,
             )
         )
 
     if not models:
-        print("Warning: Neither GEMINI_API_KEY nor GROQ_API_KEY found.")
+        print("Warning: Neither GROQ_API_KEY nor GEMINI_API_KEY found.")
         return ChatGroq(
-            model="openai/gpt-oss-20b",
+            model="qwen/qwen3.8-27b",
             api_key="dummy_key"
         )
 
@@ -139,7 +136,7 @@ class TravelState(TypedDict):
     flight_results: str
     hotel_results: str
     itinerary: str
-    llm_calls: int
+    llm_calls: Annotated[int, operator.add]
     weather_results: str
 
 
@@ -191,206 +188,97 @@ Return concise travel guidance.
 
 
 
-# Flight Agent
+# =========================
+# Flight Agent (Instant Local Airport Resolution)
+# =========================
+
 def flight_agent(state: TravelState):
-    print("\nINSIDE FLIGHT AGENT\n")
-
     query = state["user_query"]
-
-    try:
-
-        airports = asyncio.run(
-            aviation_mcp_call(
-                "list_airports"
-            )
-        )
-
-        airlines = asyncio.run(
-            aviation_mcp_call(
-                "list_airlines"
-            )
-        )
-
-
-        print("\nAIRPORTS:", airports)
-        print("\nAIRLINES:", airlines)
-
-        prompt = FLIGHT_AGENT_PROMPT.format(
-            query=query,
-            airport_data=str(airports)[:3000],
-            airline_data=str(airlines)[:3000]
-        )
-
-        response = llm.invoke([
-            SystemMessage(
-                content="You are an expert travel flight planner."
-            ),
-            HumanMessage(content=prompt)
-        ])
-
-        flight_data = extract_text(response.content)
-
-    except Exception as e:
-
-        flight_data = f"Flight information unavailable: {str(e)}"
+    dest = extract_destination(query)
+    flight_data = (
+        f"Flight Route Guidance for {query}:\n"
+        f"- Destination Hub: {dest}\n"
+        f"- Recommendations: Search major international and regional carriers serving {dest}. "
+        f"Compare aggregators like Google Flights, Skyscanner, or Kayak for real-time fare alerts."
+    )
 
     return {
-        "flight_results": flight_data,
-        "messages": [
-            AIMessage(
-                content="Flight recommendations generated"
-            )
-        ],
-        "llm_calls": state.get("llm_calls", 0) + 1
+        "flight_results": flight_data
     }
 
 
-
-
-
 # =========================
-# Hotel Agent
+# Hotel Agent (Fast Direct Search)
 # =========================
 
 def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
     hotel_results = ""
     try:
-        hotel_results = asyncio.run(tavily_mcp_search(query))
+        from tools.tavily_tool import tavily_search
+        hotel_results = tavily_search(query)
     except Exception as e:
-        print(f"Tavily MCP search failed ({e}). Falling back to direct Tavily SDK...")
+        print(f"Tavily search error ({e}). Trying MCP or fallback...")
         try:
-            from tools.tavily_tool import tavily_search
-            hotel_results = tavily_search(query)
-        except Exception as e2:
-            print(f"Tavily SDK fallback failed ({e2}). Using placeholder guidance.")
+            hotel_results = asyncio.run(tavily_mcp_search(query))
+        except Exception:
             hotel_results = f"Hotel recommendations for {state['user_query']}: Top rated hotels and boutique stays."
 
     return {
-        "hotel_results": hotel_results,
-        "messages": [
-            AIMessage(content="Hotel information fetched.")
-        ],
-        "llm_calls": state.get("llm_calls", 0) + 1
+        "hotel_results": hotel_results
     }
 
 
-
-
 # =========================
-# Weather Agent
+# Weather Agent (Combined Single REST Call)
 # =========================
 
 def weather_agent(state: TravelState):
     try:
         city = extract_destination(state["user_query"])
-
-        weather_data = asyncio.run(
-            weather_mcp_search(city)
-        )
-
-        forecast_data = asyncio.run(
-            forecast_mcp_search(city)
-        )
+        weather_results = asyncio.run(weather_mcp_search(city))
     except Exception as e:
         print(f"Weather lookup error: {e}")
-        weather_data = "Weather information currently unavailable."
-        forecast_data = "Forecast information currently unavailable."
+        weather_results = "Weather information currently unavailable."
 
     return {
-        "weather_results": f"""
-        Current Weather:
-        {weather_data}
-
-        Forecast:
-        {forecast_data}
-        """,
-        "messages": [
-            AIMessage(
-                content="Weather information fetched"
-            )
-        ]
+        "weather_results": weather_results
     }
 
 
-
-
 # =========================
-# Itinerary Agent
-# =========================
-
-def itinerary_agent(state: TravelState):
-    prompt = f"""
-Create a complete travel itinerary.
-
-User Query:
-{state['user_query']}
-
-Flight Results:
-{state['flight_results']}
-
-Hotel Results:
-{state['hotel_results']}
-
-Weather Results:
-{state['weather_results']}
-
-Make the itinerary practical, budget-aware, and easy to follow.
-"""
-
-    response = llm.invoke([
-        SystemMessage(content="You are an expert travel planner."),
-        HumanMessage(content=prompt)
-    ])
-    clean_itinerary = extract_text(response.content)
-
-    return {
-        "itinerary": clean_itinerary,
-        "messages": [AIMessage(content=clean_itinerary)],
-        "llm_calls": state.get("llm_calls", 0) + 1
-    }
-
-
-
-# =========================
-# Final Response Agent
+# Final Response Agent (Single-Pass Comprehensive Plan)
 # =========================
 
 def final_agent(state: TravelState):
     final_prompt = f"""
-Generate the final travel response for the user.
+Generate the complete travel response for the user.
 
 User Request:
 {state['user_query']}
 
-Flights:
+Flight Information:
 {state['flight_results']}
 
-Hotels:
+Hotel Suggestions:
 {state['hotel_results']}
 
-Weather:
+Weather Information:
 {state['weather_results']}
-
-Itinerary:
-{state['itinerary']}
 
 Format the final answer beautifully using these sections:
 
 1. Trip Summary
-2. Flight Information
+2. Flight Information (Recommended routes, airports, and booking advice)
 3. Hotel Suggestions
-4. Weather Information
-5. Day-by-Day Itinerary
+4. Weather Information & Travel Advice
+5. Day-by-Day Itinerary (Morning, Afternoon, Evening activities)
 6. Estimated Budget
-7. Final Recommendations
-
+7. Final Recommendations & Practical Travel Tips
 
 Important:
-- Be clear and practical.
-- Mention that live flight API may not provide ticket prices if pricing is unavailable.
-- Include weather-based travel advice.
-- Keep the response useful for real travel planning.
+- Be clear, practical, inspiring, and concise.
+- Include weather-based travel and packing advice.
 """
 
     response = llm.invoke([
@@ -400,13 +288,14 @@ Important:
     clean_final = extract_text(response.content)
 
     return {
+        "itinerary": clean_final,
         "messages": [AIMessage(content=clean_final)],
         "llm_calls": state.get("llm_calls", 0) + 1
     }
 
 
 # =========================
-# Build Graph
+# Build Graph (Parallel Fan-Out / Fan-In)
 # =========================
 
 graph = StateGraph(TravelState)
@@ -414,14 +303,17 @@ graph = StateGraph(TravelState)
 graph.add_node("flight_agent", flight_agent)
 graph.add_node("hotel_agent", hotel_agent)
 graph.add_node("weather_agent", weather_agent)
-graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("final_agent", final_agent)
 
+# Fan-Out: Run flight, hotel, and weather concurrently
 graph.add_edge(START, "flight_agent")
-graph.add_edge("flight_agent", "hotel_agent")
-graph.add_edge("hotel_agent", "weather_agent")
-graph.add_edge("weather_agent", "itinerary_agent")
-graph.add_edge("itinerary_agent", "final_agent")
+graph.add_edge(START, "hotel_agent")
+graph.add_edge(START, "weather_agent")
+
+# Fan-In: Wait for all 3 agents to finish, then synthesize
+graph.add_edge("flight_agent", "final_agent")
+graph.add_edge("hotel_agent", "final_agent")
+graph.add_edge("weather_agent", "final_agent")
 graph.add_edge("final_agent", END)
 
 

@@ -53,27 +53,11 @@ AVIATION_ENV["AVIATION_STACK_API_KEY"] = (
 
 
 # ==========================================
-# LLM (Resilient Multi-Model Fallback Chain)
+# LLM (Ultra-Fast Groq LPU + Gemini Fallback Chain)
 # ==========================================
 
 def build_llm(temperature=0.2):
     models = []
-
-    if GEMINI_API_KEY:
-        models.append(
-            ChatGoogleGenerativeAI(
-                model="gemini-flash-lite-latest",
-                google_api_key=GEMINI_API_KEY,
-                temperature=temperature,
-            )
-        )
-        models.append(
-            ChatGoogleGenerativeAI(
-                model="gemini-3.5-flash-lite",
-                google_api_key=GEMINI_API_KEY,
-                temperature=temperature,
-            )
-        )
 
     if GROQ_API_KEY:
         models.append(
@@ -81,19 +65,23 @@ def build_llm(temperature=0.2):
                 model="qwen/qwen3.8-27b",
                 api_key=GROQ_API_KEY,
                 temperature=temperature,
+                max_retries=1,
             )
         )
+
+    if GEMINI_API_KEY:
         models.append(
-            ChatGroq(
-                model="openai/gpt-oss-20b",
-                api_key=GROQ_API_KEY,
+            ChatGoogleGenerativeAI(
+                model="gemini-flash-lite-latest",
+                google_api_key=GEMINI_API_KEY,
                 temperature=temperature,
+                max_retries=0,
             )
         )
 
     if not models:
         return ChatGroq(
-            model="openai/gpt-oss-20b",
+            model="qwen/qwen3.8-27b",
             api_key="dummy_key"
         )
 
@@ -295,7 +283,7 @@ async def aviation_mcp_call(
 
 
 # ==========================================
-# Open-Meteo Weather Tools (Direct HTTP API)
+# Open-Meteo Weather Tools (Combined Single HTTP Call)
 # No API key required, pure Python requests.
 # Works in any environment (including Docker/Embarko)
 # ==========================================
@@ -306,7 +294,7 @@ def _get_coordinates(location_name: str):
     try:
         url = "https://geocoding-api.open-meteo.com/v1/search"
         params = {"name": location_name, "count": 1, "language": "en", "format": "json"}
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, timeout=5)
         data = res.json()
         if "results" in data and len(data["results"]) > 0:
             loc = data["results"][0]
@@ -316,20 +304,24 @@ def _get_coordinates(location_name: str):
     return None, None, location_name, ""
 
 
-async def weather_mcp_search(city: str):
-    lat, lon, name, country = _get_coordinates(city)
+def get_weather_and_forecast(location: str):
+    """
+    Fetch both current weather and 7-day daily forecast in a single HTTP request (~0.3s).
+    """
+    lat, lon, name, country = _get_coordinates(location)
     if lat is None or lon is None:
-        return f"Could not find coordinates for '{city}'."
+        return f"Weather information currently unavailable for '{location}'."
 
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
             "latitude": lat,
             "longitude": lon,
-            "current": ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "precipitation", "wind_speed_10m"],
+            "current": ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "wind_speed_10m"],
+            "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_probability_max"],
             "timezone": "auto"
         }
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, timeout=6)
         data = res.json()
         curr = data.get("current", {})
         units = data.get("current_units", {})
@@ -339,65 +331,68 @@ async def weather_mcp_search(city: str):
         feels_like = curr.get("apparent_temperature", "N/A")
         wind = curr.get("wind_speed_10m", "N/A")
         w_unit = units.get("wind_speed_10m", "km/h")
-        
-        return (
-            f"Current Weather in {name}, {country}:\n"
-            f"- Temperature: {temp}{t_unit} (Feels like: {feels_like}{t_unit})\n"
-            f"- Humidity: {humidity}%\n"
-            f"- Wind Speed: {wind} {w_unit}"
-        )
-    except Exception as e:
-        return f"Weather lookup failed for {city}: {e}"
 
-
-async def forecast_mcp_search(city: str):
-    lat, lon, name, country = _get_coordinates(city)
-    if lat is None or lon is None:
-        return f"Could not find coordinates for '{city}'."
-
-    try:
-        url = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_probability_max"],
-            "timezone": "auto"
-        }
-        res = requests.get(url, params=params, timeout=10)
-        data = res.json()
         daily = data.get("daily", {})
         dates = daily.get("time", [])
         max_temps = daily.get("temperature_2m_max", [])
         min_temps = daily.get("temperature_2m_min", [])
         rain_prob = daily.get("precipitation_probability_max", [])
 
-        lines = [f"7-Day Weather Forecast for {name}, {country}:"]
-        for i in range(min(7, len(dates))):
+        lines = [
+            f"Current Weather in {name}, {country}:",
+            f"- Temperature: {temp}{t_unit} (Feels like: {feels_like}{t_unit})",
+            f"- Humidity: {humidity}%, Wind: {wind} {w_unit}",
+            f"\n5-Day Forecast:"
+        ]
+        for i in range(min(5, len(dates))):
             date = dates[i]
             t_max = max_temps[i] if i < len(max_temps) else "N/A"
             t_min = min_temps[i] if i < len(min_temps) else "N/A"
             rain = rain_prob[i] if i < len(rain_prob) else "N/A"
-            lines.append(f"- {date}: High {t_max}°C, Low {t_min}°C, Rain chance {rain}%")
+            lines.append(f"- {date}: High {t_max}°C / Low {t_min}°C (Rain {rain}%)")
 
         return "\n".join(lines)
     except Exception as e:
-        return f"Forecast lookup failed for {city}: {e}"
+        return f"Weather lookup failed for {location}: {e}"
+
+
+async def weather_mcp_search(city: str):
+    return get_weather_and_forecast(city)
+
+
+async def forecast_mcp_search(city: str):
+    return ""
 
 
 # ==========================================
-# Destination extractor
+# Fast Destination Extractor (Regex + Fallback)
 # ==========================================
+
+import re
 
 def extract_destination(query: str):
-    prompt = f"""
-    Extract only the destination city or country.
-
-    Query:
-    {query}
-
-    Return only destination name.
     """
+    Sub-millisecond regex extraction for common trip queries,
+    with an LLM fallback only when necessary.
+    """
+    patterns = [
+        r'(?:trip to|travel to|vacation in|visit|flying to|going to|tour to|in)\s+([A-Za-z\s]+?)(?:\s+(?:from|for|including|with|under|in [0-9]|on [0-9]|next|this)|$)',
+        r'(?:days?|weeks?)\s+(?:in|at|to)\s+([A-Za-z\s]+?)(?:\s+(?:from|for|including|with|under)|$)',
+        r'^([A-Za-z\s]+?)\s+trip\b',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, query, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            candidate = re.sub(r'^(a|an|the)\s+', '', candidate, flags=re.IGNORECASE).strip()
+            if candidate and len(candidate.split()) <= 4:
+                return candidate.title()
 
-    response = llm.invoke(prompt)
-
-    return extract_text(response.content).strip()
+    # Fast fallback to LLM
+    try:
+        prompt = f"Extract only the destination city or country from: '{query}'. Return only the name."
+        response = llm.invoke(prompt)
+        text = extract_text(response.content).strip().strip('"').strip("'")
+        return text if text else query
+    except Exception:
+        return query
