@@ -23,7 +23,7 @@
 
         <section class="hero-section">
             <div class="badge">
-                ✈️ TripMate AI — A Multi-Agent Travel Planner with LangGraph & MCP
+                ✈️ TripMate AI — Multi-Agent Travel Planner · Supervisor · Guardrails · HITL
             </div>
 
             <h1>
@@ -89,7 +89,7 @@
 
             <div class="result-header">
                 <div>
-                    <h2>Your AI Travel Plan</h2>
+                    <h2 id="resultTitle">Your AI Travel Plan</h2>
                     <p id="threadInfo">Thread ID: -</p>
                 </div>
 
@@ -103,6 +103,23 @@
                     </button>
                 </div>
             </div>
+
+            <div id="hitlPanel" class="hitl-panel hidden">
+                <div class="hitl-badge">Human-in-the-Loop Review Required</div>
+                <p id="hitlPrompt" class="hitl-prompt"></p>
+                <textarea id="hitlFeedback" class="hitl-feedback"
+                    placeholder="Optional revision feedback (required if requesting changes, e.g. 'Add more budget street food and reduce museum visits')..."></textarea>
+                <div class="hitl-actions">
+                    <button id="approveBtn" class="approve-btn" onclick="submitApproval(true)">
+                        Approve &amp; Finalize
+                    </button>
+                    <button id="reviseBtn" class="revise-btn" onclick="submitApproval(false)">
+                        Request Revision
+                    </button>
+                </div>
+            </div>
+
+            <div id="guardrailNotice" class="guardrail-notice hidden"></div>
 
             <div id="pdfContent" class="pdf-content">
                 <h1 class="pdf-title">AI Travel Plan</h1>

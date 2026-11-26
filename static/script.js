@@ -35,12 +35,18 @@ function hideError() {
     errorBox.textContent = "";
 }
 
-function showResult(answer, threadId) {
+function showResult(data) {
+    const answer = data.answer || "";
     latestAnswerMarkdown = answer;
 
     const resultSection = document.getElementById("resultSection");
+    const resultTitle = document.getElementById("resultTitle");
     const resultBox = document.getElementById("resultBox");
     const threadInfo = document.getElementById("threadInfo");
+    const hitlPanel = document.getElementById("hitlPanel");
+    const hitlPrompt = document.getElementById("hitlPrompt");
+    const hitlFeedback = document.getElementById("hitlFeedback");
+    const guardrailNotice = document.getElementById("guardrailNotice");
 
     if (typeof marked !== "undefined") {
         resultBox.innerHTML = marked.parse(answer);
@@ -48,7 +54,30 @@ function showResult(answer, threadId) {
         resultBox.innerText = answer;
     }
 
-    threadInfo.textContent = `Thread ID: ${threadId}`;
+    threadInfo.textContent = `Thread ID: ${data.thread_id}`;
+
+    if (data.guardrail_allowed === false) {
+        resultTitle.textContent = "Request Blocked by Guardrail";
+        guardrailNotice.textContent = data.guardrail_reason || "Only travel-planning requests are allowed.";
+        guardrailNotice.classList.remove("hidden");
+    } else {
+        guardrailNotice.classList.add("hidden");
+        guardrailNotice.textContent = "";
+    }
+
+    if (data.requires_approval) {
+        resultTitle.textContent = "Draft Itinerary (Awaiting Your Approval)";
+        hitlPrompt.textContent =
+            data.approval_request ||
+            "Review the draft itinerary below. Approve to finalize or request revisions.";
+        hitlFeedback.value = "";
+        hitlPanel.classList.remove("hidden");
+    } else {
+        if (data.guardrail_allowed !== false) {
+            resultTitle.textContent = "Your AI Travel Plan";
+        }
+        hitlPanel.classList.add("hidden");
+    }
 
     resultSection.classList.remove("hidden");
 
@@ -56,6 +85,58 @@ function showResult(answer, threadId) {
         behavior: "smooth",
         block: "start"
     });
+}
+
+function setApprovalLoading(isLoading) {
+    const approveBtn = document.getElementById("approveBtn");
+    const reviseBtn = document.getElementById("reviseBtn");
+    if (approveBtn) approveBtn.disabled = isLoading;
+    if (reviseBtn) reviseBtn.disabled = isLoading;
+}
+
+async function submitApproval(approved) {
+    hideError();
+
+    if (!currentThreadId) {
+        showError("No active travel thread found.");
+        return;
+    }
+
+    const feedback = document.getElementById("hitlFeedback").value.trim();
+    if (!approved && !feedback) {
+        showError("Please enter revision feedback before requesting changes.");
+        return;
+    }
+
+    setApprovalLoading(true);
+    setLoading(true);
+
+    try {
+        const response = await fetch("/api/travel/approve", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                thread_id: currentThreadId,
+                approved: approved,
+                feedback: feedback
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || "Could not submit approval.");
+        }
+
+        showResult(data);
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        setApprovalLoading(false);
+        setLoading(false);
+    }
 }
 
 async function sendMessage() {
@@ -92,7 +173,7 @@ async function sendMessage() {
         currentThreadId = data.thread_id;
         localStorage.setItem("travel_thread_id", currentThreadId);
 
-        showResult(data.answer, data.thread_id);
+        showResult(data);
 
     } catch (error) {
         showError(error.message);

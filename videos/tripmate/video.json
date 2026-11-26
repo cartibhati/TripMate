@@ -1,0 +1,17 @@
+{
+  "title": "TripMate AI: Multi-Agent Travel Planner",
+  "theme": "studio",
+  "size": "16:9",
+  "voice": "af_heart",
+  "speed": 1.22,
+  "music": true,
+  "captions": "auto",
+  "defaults": "0.6",
+  "heard": {
+    "LangGraph": ["LANGraph", "langgraph"],
+    "Open-Meteo": ["open media", "openmeteo", "open meteo"],
+    "approve": ["Approved"],
+    "tripmate-ai": ["tripmite", "tripmatai"],
+    "embarko": ["embarco"]
+  }
+}

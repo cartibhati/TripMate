@@ -272,6 +272,87 @@ textarea::placeholder {
     box-shadow: 0 16px 36px rgba(34, 197, 94, 0.35);
 }
 
+.hitl-panel {
+    margin: 18px 0 22px;
+    padding: 18px 20px;
+    border-radius: 16px;
+    border: 1px solid rgba(250, 204, 21, 0.35);
+    background: rgba(30, 41, 59, 0.85);
+}
+
+.hitl-badge {
+    display: inline-block;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #fde047;
+    margin-bottom: 8px;
+}
+
+.hitl-prompt {
+    color: #e2e8f0;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+.hitl-feedback {
+    width: 100%;
+    min-height: 76px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: rgba(15, 23, 42, 0.85);
+    color: #f8fafc;
+    font-family: inherit;
+    font-size: 0.95rem;
+    resize: vertical;
+    margin-bottom: 12px;
+}
+
+.hitl-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.approve-btn,
+.revise-btn {
+    border: none;
+    border-radius: 12px;
+    padding: 10px 18px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.approve-btn {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #ffffff;
+}
+
+.revise-btn {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.5);
+    color: #fde68a;
+}
+
+.approve-btn:disabled,
+.revise-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.guardrail-notice {
+    margin: 14px 0 18px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(248, 113, 113, 0.45);
+    background: rgba(127, 29, 29, 0.35);
+    color: #fecaca;
+    font-weight: 600;
+}
+
 .pdf-content {
     background: #ffffff;
     color: #111827;
